@@ -1,0 +1,10 @@
+{
+  "name": "space-invaders-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny mobile-friendly Space Invaders game, deployed on Cloudflare Workers.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}
