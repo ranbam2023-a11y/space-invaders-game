@@ -33,10 +33,12 @@
   const INV_ROWS = 4, INV_COLS = 6;
   const INV_W = 26, INV_H = 18, GAP_X = 22, GAP_Y = 26;
   const PLAYER_W = 30, PLAYER_H = 14, PLAYER_Y = H - 58;
+  const COMBO_WINDOW = 1.2;
 
-  let player, bullets, enemyBullets, invaders, particles;
+  let player, bullets, enemyBullets, invaders, particles, reports;
   let dir, stepDown, invSpeed, score, lives, running, gameOver, animId;
-  let fireCooldown, tickAcc, invTimer, wave, shakeT;
+  let fireCooldown, tickAcc, invTimer, wave, shakeT, combo, comboT;
+  let flashT, waveBannerT;
 
   const keys = { left: false, right: false, fire: false };
 
@@ -63,7 +65,7 @@
   function reset(full) {
     if (full) { score = 0; lives = 3; wave = 1; }
     player = { x: (W - PLAYER_W) / 2, y: PLAYER_Y, w: PLAYER_W, h: PLAYER_H };
-    bullets = []; enemyBullets = []; particles = [];
+    bullets = []; enemyBullets = []; particles = []; reports = [];
     invaders = makeInvaders();
     dir = 1;
     stepDown = 0;
@@ -72,6 +74,10 @@
     shakeT = 0;
     fireCooldown = 0;
     tickAcc = 0;
+    combo = 0;
+    comboT = 0;
+    flashT = 0;
+    waveBannerT = full ? 1.4 : 1.1;
     gameOver = false;
     updateHud();
   }
@@ -123,6 +129,10 @@
     bullets.push({ x: player.x + player.w / 2, y: player.y - 4, vy: -7 });
     fireCooldown = 0.18;
     beep(760, 0.06, 'square', 0.04);
+  }
+
+  function addFloat(x, y, text, color) {
+    reports.push({ x, y, text, color, life: 1 });
   }
 
   cvs.addEventListener('pointerdown', (e) => {
@@ -191,8 +201,15 @@
     if (fireCooldown > 0) fireCooldown -= dt;
     if (shakeT > 0) shakeT -= dt;
 
+    if (comboT > 0) {
+      comboT -= dt;
+      if (comboT <= 0) combo = 0;
+    }
+    if (flashT > 0) flashT -= dt;
+    if (waveBannerT > 0) waveBannerT -= dt;
+
     // player movement
-    const spd = 260 * dt;
+    const spd = 320 * dt;
     if (keys.left) player.x -= spd;
     if (keys.right) player.x += spd;
     if (keys.fire) shoot();
@@ -248,10 +265,15 @@
         if (b.x > inv.x && b.x < inv.x + inv.w && b.y > inv.y && b.y < inv.y + inv.h) {
           inv.alive = false;
           hit = true;
-          const pts = inv.type === 2 ? 30 : (inv.type === 1 ? 20 : 10);
+          combo++;
+          comboT = COMBO_WINDOW;
+          const base = inv.type === 2 ? 30 : (inv.type === 1 ? 20 : 10);
+          const mult = 1 + Math.floor(combo / 3) * 0.5;
+          const pts = Math.round(base * mult);
           score += pts;
-          spawnParticles(inv.x + inv.w / 2, inv.y + inv.h / 2, '#5ef2a0', 8);
-          beep(420 - inv.type * 60, 0.08, 'square', 0.05);
+          addFloat(inv.x + inv.w / 2, inv.y + inv.h / 2, '+' + pts, mult > 1 ? '#ffd166' : '#5ef2a0');
+          spawnParticles(inv.x + inv.w / 2, inv.y + inv.h / 2, mult > 1 ? '#ffd166' : '#5ef2a0', combo >= 3 ? 14 : 8);
+          beep(420 - inv.type * 60 + Math.min(combo, 8) * 30, 0.08, 'square', 0.05);
           updateHud();
           break;
         }
@@ -290,12 +312,21 @@
       p.x += p.vx; p.y += p.vy; p.vy += 0.06; p.life -= dt * 1.8;
       if (p.life <= 0) particles.splice(i, 1);
     }
+
+    // floating score popups
+    for (let i = reports.length - 1; i >= 0; i--) {
+      const r = reports[i];
+      r.y -= dt * 26; r.life -= dt * 1.4;
+      if (r.life <= 0) reports.splice(i, 1);
+    }
   }
 
   function loseLife() {
     lives--;
+    combo = 0; comboT = 0;
     updateHud();
     shakeT = 0.35;
+    flashT = 0.4;
     spawnParticles(player.x + player.w / 2, player.y, '#ff5c7a', 14);
     beep(140, 0.25, 'sawtooth', 0.07);
     if (lives <= 0) { endGame(); return; }
@@ -376,6 +407,16 @@
 
     drawPlayer();
 
+    // floating score popups
+    ctx.font = 'bold 11px ui-monospace,monospace';
+    ctx.textAlign = 'center';
+    for (const r of reports) {
+      ctx.globalAlpha = Math.max(0, r.life);
+      ctx.fillStyle = r.color;
+      ctx.fillText(r.text, Math.round(r.x), Math.round(r.y));
+    }
+    ctx.globalAlpha = 1;
+
     // particles
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, p.life);
@@ -384,12 +425,34 @@
     }
     ctx.globalAlpha = 1;
 
+    // combo meter
+    if (running && combo >= 3) {
+      ctx.fillStyle = 'rgba(255,209,102,.9)';
+      ctx.font = 'bold 12px ui-monospace,monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('x' + (1 + Math.floor(combo / 3) * 0.5).toFixed(1) + ' COMBO', W / 2, 40);
+    }
+
     // wave banner
-    if (running) {
+    if (waveBannerT > 0 && running) {
+      const a = Math.min(1, waveBannerT * 2);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#e8f0ff';
+      ctx.font = 'bold 16px ui-monospace,monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('WAVE ' + wave, W / 2, H / 2 - 30);
+      ctx.globalAlpha = 1;
+    } else if (running) {
       ctx.fillStyle = 'rgba(232,240,255,.35)';
       ctx.font = '10px ui-monospace,monospace';
       ctx.textAlign = 'center';
       ctx.fillText('WAVE ' + wave, W / 2, 22);
+    }
+
+    // damage flash
+    if (flashT > 0) {
+      ctx.fillStyle = 'rgba(255,92,122,' + (flashT * 0.4) + ')';
+      ctx.fillRect(-10, -10, W + 20, H + 20);
     }
 
     ctx.restore();
